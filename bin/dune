@@ -1,0 +1,4 @@
+(executable
+ (public_name agentic-harness)
+ (name main)
+ (libraries agentic_harness))

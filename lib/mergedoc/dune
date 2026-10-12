@@ -1,0 +1,8 @@
+(include_subdirs unqualified)
+
+(library
+ (name mergedoc)
+ (wrapped false)
+ (modules
+          merge )
+ (libraries capnp capnp-rpc-unix capnp-rpc-lwt))

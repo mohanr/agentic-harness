@@ -1,0 +1,9 @@
+(library
+ (name test_agentic_harness)
+(libraries eio_main containers core eio.mock agentic_harness)
+ (inline_tests)
+ (preprocess (pps ppx_bin_prot ppx_deriving.show
+                  ppx_sexp_conv ppx_inline_test ppx_assert ppx_expect))
+ (modules
+         test_agentic_harness
+          test_collaborative_editor))
