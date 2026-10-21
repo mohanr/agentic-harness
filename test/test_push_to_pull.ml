@@ -35,7 +35,8 @@ let%expect_test ""=
 
 
 let to_gen (type a) (t : a t) iter =
-  let module M = struct type _ Effect.t += Next : a -> unit Effect.t end in
+  let module M =
+  struct type _ Effect.t += Next : a -> unit Effect.t end in
   let open M in
   let step = ref (fun () -> assert false) in
   let first_step () =

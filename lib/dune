@@ -10,4 +10,6 @@
  (libraries logs logs.fmt logs.lwt timedesc capnp-rpc-unix capnp-rpc-lwt
    lwt_eio core eio_main containers re mergedoc )
  (preprocess (pps ppx_bin_prot ppx_deriving.show ppx_sexp_conv ppx_compare))
-(modules :standard \ layout basechannel pregel-loop layout_configure lastvalue))
+(modules :standard \ basechannel pregel-loop lastvalue))
+(dirs :standard \ agent-view agent-core)
+; (modules :standard \ layout basechannel pregel-loop layout_configure lastvalue))

@@ -1,30 +1,38 @@
+open Layout_types
+open Stdlib
+open Effect
+open Effect.Deep
+type _ Effect.t += Cannot_Backtrack : unit -> unit Effect.t
+
 module type PARAMS = sig
   val page_width :int
-
 end
 
 
-module Doc(Params : _PARAMS)
-= struct
+module Docu(Params : PARAMS) = struct
 
-    let page_width = PARAMS.page_width ;
+     let page_width = Params.page_width
 
-    private bool flatten;
-    private int nestingLevel;
-    private int wroteIndentation;
+     let flatten = ref true
 
-    private int lineTextLength;
+     let nesting_level = ref 0
 
-    private readonly List<Doc> stack = new();
+     let wrote_indentation = ref 0
 
-    let doc_stack :  Stack.t = Stack.create()
-    private readonly List<string> lineBuffer = new();
+     let linetext_length = ref 0
 
-    private bool canBacktrack;
+     let linebuffer_count = ref 0
 
-    private readonly StringBuilder output = new();
+     let doc_stack : item Stack.t = Stack.create()
 
-    let layout_printf ?(fmt = Format.str_formatter) =
+     let line_buffer  = ref List.([])
+
+     let can_backtrack  = ref true
+
+     let output_buffer =  Buffer.create 256
+
+
+    let layout_printf fmt =
        let b = Buffer.create 256 in (*  Should be configurable*)
        let ppf = Format.formatter_of_buffer b in
        Format.kfprintf (fun ppf ->
@@ -32,328 +40,254 @@ module Doc(Params : _PARAMS)
           Buffer.contents b
        ) ppf fmt
 
+    let push item = Stack.push item doc_stack
 
-    let bool stack pop item =
+    let pop item =
 
-        if Stack.length = 0) then
-            let item = Empty in
-            false;
+        if Stack.length doc_stack = 0 then
+            None
         else
-            let index = Stack.length - 1 in
-            let item = Stack.index];
-
-        stack.RemoveAt(index);
-
-        return true;
-
-
-    let void Write(string text)
-    {
-        lineBuffer.Add(text);
-    }
-
-
-    let bool Fits()
-    {
-        return wroteIndentation + lineTextLength <= pageWidth;
-    }
-
-
-    let flush_if_possible backtrack =
-        if !backtrack then
-            flush()
-        else ()
+            let item = Stack.pop doc_stack in
+            Some item
 
 
 
-
-    let void Backtrack()
-    {
-        if (!canBacktrack)
-            throw new InvalidOperationException(
-                "Cannot backtrack");
+    let write text =
+        List.append !line_buffer [text]
 
 
-        while (Pop(out var item))
-        {
-            if (item is ChoicePoint cp)
-            {
-                Push(cp.Fallback);
-
-                nestingLevel = cp.NestingLevel;
-
-                lineBuffer.RemoveRange(
-                    cp.LineBufferCount,
-                    lineBuffer.Count - cp.LineBufferCount);
-
-                lineTextLength = cp.LineTextLength;
-
-                flatten = cp.Flatten;
-
-                canBacktrack = cp.CanBacktrack;
-
-                return;
-            }
-        }
-
-        throw new InvalidOperationException(
-            "Didn't find a choice point");
-    }
+    let fits() = (!wrote_indentation + !linetext_length) <= page_width
 
 
-    let void backtrack_check backtrack =
-        if (backtrack && !fits()) then
+
+   let peek stack i  =
+     let l =
+       Stack.to_seq stack
+       |> List.of_seq
+     in
+       List.nth l i
+
+    let rec commit ()=
+      (* let rec drop n l = *)
+      (*     if n == 0 then l *)
+      (*     else (drop (n -1) (match l with a::b -> b)) *)
+      let replace_in_list l idx  =
+      let local_l = Stack.to_seq l
+      |> List.of_seq in
+      let local_s =
+       List.concat (
+           List.mapi (fun i x ->
+                 if i = idx then [Empty_Item; x] else [x]
+           ) local_l
+         )
+       |>
+       List.to_seq |>
+       Stack.of_seq
+      in local_s
+      in
+      let _ =
+      let rec loop_while stack i =
+        if i >= 0 then(
+          match peek stack i with
+          | ChoicePoint cp ->
+           let rec loop_while_choice_point (stack : item Stack.t) j =
+            if j <= i then
+             loop_while_choice_point  (replace_in_list doc_stack j)  (*  TODO Stop repeating this*)
+                ( j + 1 )
+            else
+             loop_while doc_stack cp.resume_at
+           in
+           loop_while_choice_point doc_stack (cp.resume_at + 1);
+          |_ ->
+           loop_while stack (i - 1)
+        )
+        else(
+           loop_while stack (i - 1)
+        )
+        in
+        loop_while doc_stack (Stack.length doc_stack) in
+        can_backtrack  := false
+
+
+    let flushes endofdoc  =
+        (if not endofdoc then
+          commit()
+        else begin
+            let rec loop_while content =
+            match content with
+              | hd :: tl -> let () = Buffer.add_string output_buffer hd in
+                             loop_while  tl
+              | [] -> ()
+            in loop_while !line_buffer
+          end);
+        line_buffer := []
+
+
+
+(* type _ eff += Foo : (unit -> 'a) eff *)
+
+(* let f () = perform Foo () *)
+
+(* let res : type a. a = *)
+(*   match f () with *)
+(*   | x -> x *)
+(*   | effect Foo, k -> *)
+(*      continue k (fun () -> perform Foo ()) *)
+
+    let backtrack()   =
+       let module M =
+       struct type _ Effect.t += Next : item -> (unit -> unit) Effect.t end in
+       let open M in
+       let f () =  perform (Next (Stack.pop doc_stack)) () in
+        try
+             if not !can_backtrack then
+              perform (Cannot_Backtrack ())
+             else(
+              let res  =
+                (match f () with
+                    | x -> x
+                    | effect Next v, k ->
+                     (match v with
+                     | ChoicePoint cp ->
+                           let () = (match cp.fallback with | Some v -> push (Doc v )| None -> ()) in
+                           nesting_level := cp.nesting_level ;
+                           line_buffer := List.filteri( fun  i a ->
+                                                       i >= cp.linebuffer_count &&
+                                                       i <= (List.length !line_buffer)
+                                                        - cp.linebuffer_count) !line_buffer;
+                           linetext_length := cp.linetext_length ;
+                           flatten :=  cp.flatten;
+                           can_backtrack :=  cp.can_backtrack;
+                     | _ ->
+                           continue k f
+                     )
+                )
+                in res
+              )
+
+         with
+          | effect Cannot_Backtrack v, k -> ()
+
+    let backtrack_check() =
+        if (!can_backtrack && not (fits ())) then
             backtrack()
         else ()
 
-    let int get_resume_at candidate =
-      let loop_while c =
-        match candidate with
-        | candidate when >= 0 ->
-                                   (match c with
-                                   |ChoicePoint  cp ->
+    let write content =
+      line_buffer := List.append !line_buffer [content]
+
+    let get_resume_at candidate =
+      let chosen_candidate =
+      let rec loop_while c =
+        (match c with
+        | c when c >= 0 ->
+                                  let local_l = Stack.to_seq doc_stack
+                                  |> List.of_seq in
+                                   (match List.nth local_l c  with
+                                   |  ChoicePoint  cp ->
                                         loop_while cp.resume_at
-                                   | _ -> let c  List.nth stack candidate
-                                           loop_while c
+                                   |  _ -> loop_while c
                                    )
-        | candidate when < 0 ->  let c =  List.nth stack candidate in
-                                 loop_while c
+        | _ ->   candidate
+        )
+      in loop_while candidate
+      in chosen_candidate
 
 
-   let make ( config : (module ORDERED_SET_ABSTRACTIONS))=
-    let ChoicePoint CreateChoicePoint(
-        Doc fallback,
-        int nestingLevel,
-        int lineBufferCount,
-        int lineTextLength,
-        bool flatten,
-        bool canBacktrack,
-        int resumeAt)
-    {
-        return new ChoicePoint
+    let createchoicepoint
+        fallback resume_at
+    =
         {
-            Fallback = fallback,
-            NestingLevel = nestingLevel,
-            LineBufferCount = lineBufferCount,
-            LineTextLength = lineTextLength,
-            Flatten = flatten,
-            CanBacktrack = canBacktrack,
-            ResumeAt = resumeAt
-        };
-    }
-
-
-    let void Flush(bool endOfDoc = false)
-    {
-        if (!endOfDoc)
-            Commit();
-
-        foreach (var text in lineBuffer)
-            output.Append(text);
-
-        lineBuffer.Clear();
-    }
-
-
-    let void commit start count stack =
-      let rec drop n l =
-          if n == 0 then l
-          else (drop (n -1) (match l with a::b -> b))
-      in
-      let l =
-      let loop_while i =
-        if i >= 0 then
-          match stack with
-          | ChoicePoint cp ->
-                let start = cp.resumeat + 1 in
-                let count = i - cp.resumeat in
-                let index =match List.find_index (fun v -> v = start) stack
-                           with |Some i -> i
-                                |None -> failwith "Not found"
-                in
-                let sublist list index =
-                     List.filteri l ~f:(fun i _ -> i >= index )
-                in
-                (List.take index stack) @ (drop count (sublist list index))
-                in
-                loop_while cp.resume_at
-        else
-           loop_while (i - 1)
-        in
-        ( false,l)
-
-
-    let Layout document =
-        let () = doc_stack.push document in
-        let () = layoutcore() in
-        let () = flush true in
-
-        return output.ToString();
-
-
-    let layoutcore() =
-        loop_while item =
-        in loop_while (Pop(out var item))
-            match item with
-              | Empty ->
-                    FlushIfPossible();
-                    BacktrackIfNecessary();
-                    break;
-
-
-                | Line:
-
-                    if (canBacktrack && (flatten || !Fits()))
-                    {
-                        Backtrack();
-                    }
-                    else
-                    {
-                        Write("\n");
-
-                        Flush();
-
-                        lineTextLength = 0;
-
-                        if (nestingLevel > 0)
-                            Write(new string(' ', nestingLevel));
-
-                        wroteIndentation = nestingLevel;
-                    }
-
-                    break;
-
-
-                | WhiteSpace(var amount):
-
-                    Write(new string(' ', amount));
-
-                    lineTextLength += amount;
-
-                    FlushIfPossible();
-                    BacktrackIfNecessary();
-
-                    break;
-
-
-                | Text(var text):
-
-                    Write(text);
-
-                    lineTextLength += text.Length;
-
-                    FlushIfPossible();
-                    BacktrackIfNecessary();
-
-                    break;
-
-
-                | Append(var left, var right):
-
-                    // Stack is LIFO.
-                    Push(right);
-                    Push(left);
-
-                    break;
-
-
-                | Choice(var first, var second):
-
-                    Push(CreateChoicePoint(
-                        second,
-                        nestingLevel,
-                        lineBuffer.Count,
-                        lineTextLength,
-                        flatten,
-                        canBacktrack,
-                        stack.Count - 1));
-
-                    canBacktrack = true;
-
-                    Push(first);
-
-                    break;
-
-
-                | Alternative(var normal, var flattened):
-
-                    Push(flatten ? flattened : normal);
-
-                    break;
-
-
-                | Nest(var amount, var body):
-
-                    Push(new SetNesting(nestingLevel));
-
-                    nestingLevel += amount;
-
-                    Push(body);
-
-                    break;
-
-
-                | Flatten(var body):
-
-                    if (!flatten)
-                    {
-                        flatten = true;
-                        Push(new EndFlatten());
-                    }
-
-                    Push(body);
-
-                    break;
-
-
-                | SetNesting(var level):
-
-                    nestingLevel = level;
-
-                    break;
-
-
-                | EndFlatten:
-
-                    flatten = false;
-
-                    break;
-
-
-                | ChoicePoint cp:
-
-                    var resumeAt = GetResumeAt(cp.ResumeAt);
-
-                    if (resumeAt < 0)
-                    {
-                        // The first branch reached the end.
-                        // There is nothing more to resume.
-                        return;
-                    }
-
-                    var resume = stack[resumeAt];
-
-                    cp.ResumeAt = resumeAt - 1;
-
-                    Push(cp);
-                    Push(resume);
-
-                    break;
-
-
-                default:
-
-                    throw new InvalidOperationException(
-                        $"Unknown document: {item.GetType()}");
-            }
+            fallback = fallback;
+            nesting_level = !nesting_level;
+            linebuffer_count = !linebuffer_count ;
+            linetext_length = !linetext_length ;
+            flatten = !flatten;
+            can_backtrack = !can_backtrack ;
+            resume_at = resume_at
         }
-    }
+
+
+
+    let rec execute() =
+
+        let rec loop_while item =
+          match item with
+          (* | `Empty -> failwith "Nothing in the stack" *)
+
+          | Doc Empty |  Empty_Item ->
+                  backtrack_check ()
+          | Doc Line->
+                    if (not !can_backtrack && (!flatten || not (fits())))
+                    then
+                      backtrack()
+                    else
+                        let () = write "\n" in
+                        flushes false;
+                        linetext_length := 0;
+                        if (!nesting_level  > 0) then
+                        let () = write
+                          (String.make !nesting_level ' ' ) in
+                        wrote_indentation := !nesting_level ;
+          | Doc Text text ->
+                     let () = write text in
+                     linetext_length := (!linetext_length + (String.length text));
+                     backtrack()
+
+          | Doc Append (left, right) ->
+
+                    push (Doc right);
+                    push (Doc left);
+          |Doc Nest (n, child) ->
+                    push (SetNesting !nesting_level );
+                    nesting_level := !nesting_level + n;
+                    push (Doc child);
+          |Doc Alternative ( default, flattened )->
+                    push (Doc (if !flatten then flattened else default));
+          |Doc Flatten child ->
+                    if !flatten then
+                        flatten := true;
+                        push EndFlatten;
+                    push (Doc child);
+          |Doc Choice (first, second) ->
+                    push (ChoicePoint (createchoicepoint (Some second) ((Stack.length doc_stack) - 1)));
+                    can_backtrack := true;
+                    push (Doc first);
+          |ChoicePoint cp ->
+                    let resume_at = get_resume_at cp.resume_at in
+                    if resume_at < 0
+                      then ()
+                    else
+                    let resume =
+                         Stack.to_seq doc_stack
+                        |> List.of_seq in
+                    let v = List.nth resume cp.resume_at in
+                    cp.resume_at <- resume_at - 1;
+                    push ( ChoicePoint cp);
+                    push v;
+          | SetNesting level->
+                    nesting_level := level;
+          | EndFlatten->
+                    flatten := false;
+        in loop_while (Stack.pop doc_stack)
+
+    let render document =
+        let () = push document in
+        let () = execute () in
+        let () = flushes  true in
+        Buffer.contents output_buffer
+
+    let layout document =
+        let () = Stack.push doc_stack document in
+        let () = execute() in
+        let () = flushes true in
+        Buffer.contents output_buffer
 
 
 end
 
 module I_Params= struct
-  let page_width = 10
+  let page_width = 10           (* Example  *)
 end
 
-module Layout = Doc( I_Params)
+module Layout = Docu( I_Params)

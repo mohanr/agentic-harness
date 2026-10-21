@@ -6,4 +6,5 @@
                   ppx_sexp_conv ppx_inline_test ppx_assert ppx_expect))
  (modules
          test_agentic_harness
+         test_layout
           test_collaborative_editor))
