@@ -14,7 +14,7 @@ module Docu(Params : PARAMS) = struct
 
      let page_width = Params.page_width
 
-     let flatten = ref true
+     let flatten = ref false
 
      let nesting_level = ref 0
 
@@ -28,7 +28,7 @@ module Docu(Params : PARAMS) = struct
 
      let line_buffer  = ref List.([])
 
-     let can_backtrack  = ref true
+     let can_backtrack  = ref false
 
      let output_buffer =  Buffer.create 256
 
@@ -72,6 +72,9 @@ module Docu(Params : PARAMS) = struct
       (* let rec drop n l = *)
       (*     if n == 0 then l *)
       (*     else (drop (n -1) (match l with a::b -> b)) *)
+      Printf.printf "Stack.length %d %s\n" (Stack.length doc_stack)
+        ([%sexp_of: item list]
+                                      (Stack.to_seq doc_stack |> List.of_seq) |> Sexp.to_string);
       let replace_in_list l idx  =
       let local_l = Stack.to_seq l
       |> List.of_seq in
@@ -98,15 +101,15 @@ module Docu(Params : PARAMS) = struct
             else
              loop_while doc_stack cp.resume_at
            in
-           loop_while_choice_point doc_stack (cp.resume_at + 1);
+           loop_while_choice_point doc_stack (cp.resume_at - 1);
           |_ ->
            loop_while stack (i - 1)
         )
         else(
-           loop_while stack (i - 1)
+            stack
         )
         in
-        loop_while doc_stack (Stack.length doc_stack) in
+        loop_while doc_stack ((Stack.length doc_stack) - 1) in
         can_backtrack  := false
 
 
@@ -153,9 +156,9 @@ module Docu(Params : PARAMS) = struct
                            let () = (match cp.fallback with | Some v -> push (Doc v )| None -> ()) in
                            nesting_level := cp.nesting_level ;
                            line_buffer := List.filteri( fun  i a ->
-                                                       i >= cp.linebuffer_count &&
-                                                       i <= (List.length !line_buffer)
-                                                        - cp.linebuffer_count) !line_buffer;
+                                                       i > cp.linebuffer_count
+                                                       )
+                                                        !line_buffer;
                            linetext_length := cp.linetext_length ;
                            flatten :=  cp.flatten;
                            can_backtrack :=  cp.can_backtrack;
@@ -204,7 +207,7 @@ module Docu(Params : PARAMS) = struct
         {
             fallback = fallback;
             nesting_level = !nesting_level;
-            linebuffer_count = !linebuffer_count ;
+            linebuffer_count = List.length !line_buffer ;
             linetext_length = !linetext_length ;
             flatten = !flatten;
             can_backtrack = !can_backtrack ;
@@ -214,6 +217,8 @@ module Docu(Params : PARAMS) = struct
 
 
     let rec execute() =
+       Printf.printf "stack: %s\n" ([%sexp_of: item list]
+                                      (Stack.to_seq doc_stack |> List.of_seq) |> Sexp.to_string);
        try
         let rec loop_while item =
          Format.printf "%a\n" Sexp.pp_hum ([%sexp_of: item] item );
@@ -224,44 +229,44 @@ module Docu(Params : PARAMS) = struct
                   backtrack_check ();
                   loop_while (Stack.pop doc_stack)
           | Doc Line->
-                    if (not !can_backtrack && (!flatten || not (fits())))
+                    if (!can_backtrack && (!flatten || not (fits())))
                     then
                       backtrack()
                     else
                         let () = write "\n" in
-                        flushes false;
+                        flushes true;
                         linetext_length := 0;
-                        if (!nesting_level  > 0) then
+                        if (!nesting_level  > 0) then(
                         let () = write
                           (String.make !nesting_level ' ' ) in
-                        wrote_indentation := !nesting_level ;
+                        wrote_indentation := !nesting_level) ;
                         loop_while (Stack.pop doc_stack)
-          | Doc Text text ->
+          | Doc (Text text) ->
                      let () = write text in
                      linetext_length := (!linetext_length + (String.length text));
-                     backtrack();
+                     backtrack_check();
                      loop_while (Stack.pop doc_stack)
 
-          | Doc Append (left, right) ->
+          | Doc (Append (left, right)) ->
 
                     push (Doc right);
                     push (Doc left);
                      loop_while (Stack.pop doc_stack)
-          |Doc Nest (n, child) ->
+          |Doc (Nest (n, child)) ->
                     push (SetNesting !nesting_level );
                     nesting_level := !nesting_level + n;
                     push (Doc child);
                      loop_while (Stack.pop doc_stack)
-          |Doc Alternative ( default, flattened )->
+          |Doc (Alternative ( default, flattened ))->
                     push (Doc (if !flatten then flattened else default));
                      loop_while (Stack.pop doc_stack)
-          |Doc Flatten child ->
-                    if !flatten then
+          |Doc (Flatten child) ->
+                    if not !flatten then(
                         flatten := true;
-                        push EndFlatten;
+                        push EndFlatten);
                     push (Doc child);
                      loop_while (Stack.pop doc_stack)
-          |Doc Choice (first, second) ->
+          |Doc (Choice (first, second)) ->
                     push (ChoicePoint (createchoicepoint (Some second) ((Stack.length doc_stack) - 1)));
                     can_backtrack := true;
                     push (Doc first);
