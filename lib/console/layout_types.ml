@@ -1,3 +1,5 @@
+open Core
+
 (* This GDT is for educational purposes *)
 (* and does not use type indexing  *)
 type choice_point = {
@@ -9,6 +11,7 @@ type choice_point = {
   can_backtrack : bool;
   mutable resume_at : int;
 }
+[@@deriving sexp ]
 
 and doc =
   | Empty : doc
@@ -26,3 +29,4 @@ and item =
   | SetNesting : int -> item
   | EndFlatten : item
   | ChoicePoint : choice_point -> item
+[@@deriving sexp ]

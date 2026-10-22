@@ -1,4 +1,5 @@
 open Layout_types
+open Core
 open Stdlib
 open Effect
 open Effect.Deep
@@ -31,7 +32,7 @@ module Docu(Params : PARAMS) = struct
 
      let output_buffer =  Buffer.create 256
 
-
+     (* TODO  *)
     let layout_printf fmt =
        let b = Buffer.create 256 in (*  Should be configurable*)
        let ppf = Format.formatter_of_buffer b in
@@ -159,7 +160,10 @@ module Docu(Params : PARAMS) = struct
                            flatten :=  cp.flatten;
                            can_backtrack :=  cp.can_backtrack;
                      | _ ->
-                           continue k f
+                       if Stack.length doc_stack = 0 then
+                         ()
+                       else
+                          continue k f
                      )
                 )
                 in res
@@ -210,13 +214,15 @@ module Docu(Params : PARAMS) = struct
 
 
     let rec execute() =
-
+       try
         let rec loop_while item =
+         Format.printf "%a\n" Sexp.pp_hum ([%sexp_of: item] item );
           match item with
           (* | `Empty -> failwith "Nothing in the stack" *)
 
           | Doc Empty |  Empty_Item ->
-                  backtrack_check ()
+                  backtrack_check ();
+                  loop_while (Stack.pop doc_stack)
           | Doc Line->
                     if (not !can_backtrack && (!flatten || not (fits())))
                     then
@@ -229,30 +235,37 @@ module Docu(Params : PARAMS) = struct
                         let () = write
                           (String.make !nesting_level ' ' ) in
                         wrote_indentation := !nesting_level ;
+                        loop_while (Stack.pop doc_stack)
           | Doc Text text ->
                      let () = write text in
                      linetext_length := (!linetext_length + (String.length text));
-                     backtrack()
+                     backtrack();
+                     loop_while (Stack.pop doc_stack)
 
           | Doc Append (left, right) ->
 
                     push (Doc right);
                     push (Doc left);
+                     loop_while (Stack.pop doc_stack)
           |Doc Nest (n, child) ->
                     push (SetNesting !nesting_level );
                     nesting_level := !nesting_level + n;
                     push (Doc child);
+                     loop_while (Stack.pop doc_stack)
           |Doc Alternative ( default, flattened )->
                     push (Doc (if !flatten then flattened else default));
+                     loop_while (Stack.pop doc_stack)
           |Doc Flatten child ->
                     if !flatten then
                         flatten := true;
                         push EndFlatten;
                     push (Doc child);
+                     loop_while (Stack.pop doc_stack)
           |Doc Choice (first, second) ->
                     push (ChoicePoint (createchoicepoint (Some second) ((Stack.length doc_stack) - 1)));
                     can_backtrack := true;
                     push (Doc first);
+                     loop_while (Stack.pop doc_stack)
           |ChoicePoint cp ->
                     let resume_at = get_resume_at cp.resume_at in
                     if resume_at < 0
@@ -265,25 +278,26 @@ module Docu(Params : PARAMS) = struct
                     cp.resume_at <- resume_at - 1;
                     push ( ChoicePoint cp);
                     push v;
+                     loop_while (Stack.pop doc_stack)
           | SetNesting level->
                     nesting_level := level;
+                     loop_while (Stack.pop doc_stack)
           | EndFlatten->
                     flatten := false;
+                     loop_while (Stack.pop doc_stack)
         in loop_while (Stack.pop doc_stack)
+       with Stack.Empty -> ()
 
-    let render document =
-        let () = push document in
-        let () = execute () in
-        let () = flushes  true in
-        Buffer.contents output_buffer
 
     let layout document =
-        let () = Stack.push doc_stack document in
+        let () = push document in
         let () = execute() in
         let () = flushes true in
-        Buffer.contents output_buffer
+        let contents = Buffer.contents output_buffer in
+        contents
 
-
+    let render document =
+    layout document
 end
 
 module I_Params= struct
